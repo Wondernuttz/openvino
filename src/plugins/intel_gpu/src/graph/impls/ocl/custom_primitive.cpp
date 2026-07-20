@@ -316,38 +316,40 @@ static std::shared_ptr<kernel_selector::cl_kernel_data> make_custom_kernel(
     return cl_kernel;
 }
 
-static std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> create_intbit_projection_pipeline(
+static std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> create_low_bit_projection_pipeline(
     const custom_gpu_primitive_node& arg,
     const kernel_impl_params& impl_param,
-    const custom_gpu_primitive& primitive) {
+    const custom_gpu_primitive& primitive,
+    const std::string& family,
+    const std::string& gemm_entry_point) {
     const auto input_shape = impl_param.get_input_layout(0).get_partial_shape();
     OPENVINO_ASSERT(input_shape.rank().is_static() && input_shape.size() >= 2,
-                    "INTBIT projection input rank must be static and at least two");
+                    family, " projection input rank must be static and at least two");
     OPENVINO_ASSERT(input_shape[input_shape.size() - 1].is_static() &&
                     input_shape[input_shape.size() - 2].is_static(),
-                    "INTBIT projection pipeline requires a concrete runtime shape");
+                    family, " projection pipeline requires a concrete runtime shape");
 
     const size_t rows = input_shape[input_shape.size() - 2].get_length();
     const size_t kdim = input_shape[input_shape.size() - 1].get_length();
-    OPENVINO_ASSERT(kdim % 128 == 0, "INTBIT K dimension must be divisible by 128, got ", kdim);
+    OPENVINO_ASSERT(kdim % 128 == 0, family, " K dimension must be divisible by 128, got ", kdim);
     const size_t ng = kdim / 128;
     const size_t fanout = impl_param.output_layouts.size() - 1;
-    OPENVINO_ASSERT(fanout > 0, "INTBIT projection pipeline requires at least one projection output");
+    OPENVINO_ASSERT(fanout > 0, family, " projection pipeline requires at least one projection output");
     OPENVINO_ASSERT(impl_param.input_layouts.size() == 2 + fanout * 3,
-                    "INTBIT projection input contract is pack-x, seqb, then decode-x/weight/scale triples; got ",
+                    family, " projection input contract is pack-x, seqb, then decode-x/weight/scale triples; got ",
                     impl_param.input_layouts.size(), " inputs for ", fanout, " projections");
 
     const auto packed_shape = impl_param.get_output_layout(0).get_partial_shape();
     OPENVINO_ASSERT(packed_shape.rank().is_static() && packed_shape.size() >= 2 &&
                     packed_shape[packed_shape.size() - 1].is_static() &&
                     static_cast<size_t>(packed_shape[packed_shape.size() - 1].get_length()) == kdim + kdim / 64,
-                    "INTBIT packed output must have K+K/64 elements");
+                    family, " packed output must have K+K/64 elements");
 
     std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> kernels;
     kernels.reserve(fanout + 1);
     const auto first_projection_shape = impl_param.get_output_layout(1).get_partial_shape();
     OPENVINO_ASSERT(first_projection_shape[first_projection_shape.size() - 1].is_static(),
-                    "INTBIT first projection must have a static N dimension");
+                    family, " first projection must have a static N dimension");
     const size_t first_ndim = first_projection_shape[first_projection_shape.size() - 1].get_length();
     const std::string quant_options = primitive.build_options +
         " -cl-mad-enable -DKDIM=" + std::to_string(kdim) + " -DNG=" + std::to_string(ng) +
@@ -367,7 +369,7 @@ static std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> create_intb
         const auto output_shape = impl_param.get_output_layout(projection + 1).get_partial_shape();
         OPENVINO_ASSERT(output_shape.rank().is_static() && output_shape.size() >= 1 &&
                         output_shape[output_shape.size() - 1].is_static(),
-                        "INTBIT projection output must have a static N dimension");
+                        family, " projection output must have a static N dimension");
         const size_t ndim = output_shape[output_shape.size() - 1].get_length();
         const std::string gemm_options = primitive.build_options +
             " -cl-mad-enable -cl-intel-256-GRF-per-thread -DKDIM=" + std::to_string(kdim) +
@@ -381,7 +383,7 @@ static std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> create_intb
             arg,
             impl_param,
             primitive,
-            "binary_gemv_native_s2_v1",
+            gemm_entry_point,
             gemm_options,
             {ndim * 4, (rows + 127) / 128, 1},
             {64, 1, 1},
@@ -420,7 +422,11 @@ static std::unique_ptr<primitive_impl> create(const custom_gpu_primitive_node& a
 
     std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> cl_kernels;
     if (primitive->kernel_entry_point == "intbit_projection_group_v1") {
-        cl_kernels = create_intbit_projection_pipeline(arg, impl_param, *primitive);
+        cl_kernels = create_low_bit_projection_pipeline(
+            arg, impl_param, *primitive, "INTBIT", "binary_gemv_native_s2_v1");
+    } else if (primitive->kernel_entry_point == "internary_projection_group_v1") {
+        cl_kernels = create_low_bit_projection_pipeline(
+            arg, impl_param, *primitive, "INTERNARY", "ternary_gemv_native_s2_v1");
     } else {
         cl_kernels.push_back(make_custom_kernel(arg,
                                                 impl_param,
