@@ -96,7 +96,9 @@ void CustomLayer::ProcessBuffersNode(const pugi::xml_node & node) {
     CheckNodeTypeAndReturnError(node, "Buffers");
     FOREACH_CHILD(tensorNode, node, "Tensor") {
         KerenlParam kp;
-        kp.format = FormatFromString(get_str_attr(tensorNode, "format", "BFYX"));
+        const auto format_name = get_str_attr(tensorNode, "format", "BFYX");
+        kp.raw = format_name == "RAW" || format_name == "raw";
+        kp.format = kp.raw ? cldnn::format{cldnn::format::bfyx} : FormatFromString(format_name);
         CheckAndReturnError(kp.format == cldnn::format::format_num, "Tensor node has an invalid format: " << get_str_attr(tensorNode, "format"));
         kp.paramIndex = get_int_attr(tensorNode, "arg-index", -1);
         CheckAndReturnError(kp.paramIndex == -1, "Tensor node has no arg-index");

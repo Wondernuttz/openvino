@@ -28,12 +28,13 @@ public:
     } ParamType;
     struct KerenlParam {
         KerenlParam() :type(Input), paramIndex(-1), portIndex(-1),
-                       format(cldnn::format::any) {}
+                       format(cldnn::format::any), raw(false) {}
         ParamType type;
         int paramIndex;
         int portIndex;
         std::string blobName;
         cldnn::format format;
+        bool raw;
     };
 
     struct KernelDefine {

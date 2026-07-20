@@ -130,6 +130,7 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
     // Handle kernel parameters
     std::vector<cldnn::custom_gpu_primitive::arg_desc> kernelParameters;
     std::vector<cldnn::format> outputFormats;
+    std::vector<bool> rawOutputs;
     for (const auto& param : customLayer->KernelParams()) {
         switch (param.type) {
         case CustomLayer::ParamType::Input: {
@@ -141,8 +142,9 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
             // Handle input reorder
             if (param.portIndex < static_cast<int>(inputs.size()) && reordered_inputs[param.portIndex].pid.empty()) {
                 // todo: add support for multiple reorders of the same input? (read as bfyx for one arg and yxfb for another)
-                if (param.format != cldnn::format::any) {
-                    auto reorderPrimName = inputs[param.portIndex].pid + "_" + op->get_friendly_name() + ProgramBuilder::m_preCustomLayerTag;
+                if (param.format != cldnn::format::any && !param.raw) {
+                    auto reorderPrimName = inputs[param.portIndex].pid + "_" + op->get_friendly_name() +
+                                           ProgramBuilder::m_preCustomLayerTag + "_input_" + std::to_string(param.portIndex);
                     auto preprocessPrim = cldnn::reorder(
                         reorderPrimName,
                         inputs[param.portIndex],
@@ -163,6 +165,7 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
             kernelParameters[param.paramIndex].index =
                 static_cast<cldnn::custom_gpu_primitive::arg_index>((param.portIndex >= static_cast<int>(inputs.size())) ? -1 : param.portIndex);
             outputFormats.push_back(param.format);
+            rawOutputs.push_back(param.raw);
             break;
         }
         default:
@@ -174,6 +177,7 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
 
     int iidx = customLayer->InputDimSourceIndex();
     OPENVINO_ASSERT(outputFormats.size() == op->get_output_size(), "The number of outputFormats should be same as op->get_output_size().");
+    OPENVINO_ASSERT(rawOutputs.size() == op->get_output_size(), "The number of raw output flags should be same as op->get_output_size().");
 
     std::vector<cldnn::layout> outputLayouts(op->get_output_size());
     for (size_t i = 0; i < op->get_output_size(); i++) {
@@ -245,7 +249,7 @@ void CreateCustomOp(ProgramBuilder& p, const std::shared_ptr<ov::Node>& op, Cust
     p.add_primitive(*op, customPrim);
 
     for (size_t i = 0; i < outputLayouts.size(); i++) {
-        if (outputLayouts[i].format != cldnn::format::any) {
+        if (outputLayouts[i].format != cldnn::format::any && !rawOutputs[i]) {
             auto default_format = cldnn::format::get_default_format(op->get_output_partial_shape(i).size());
             if (outputLayouts.size() > 1) {
                 OPENVINO_ASSERT(default_format == outputLayouts[i].format,
