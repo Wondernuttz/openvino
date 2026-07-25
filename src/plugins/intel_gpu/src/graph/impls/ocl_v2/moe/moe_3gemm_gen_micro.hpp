@@ -88,10 +88,11 @@ public:
 
         ov::Shape zp_shape;
         ov::element::Type zp_dt;
+        size_t selection_n;
 
         bool operator==(const GemmCacheKey& other) const {
             return type == other.type && weight_shape == other.weight_shape && weight_dt == other.weight_dt && scale_shape == other.scale_shape &&
-                   scale_dt == other.scale_dt && zp_shape == other.zp_shape && zp_dt == other.zp_dt;
+                   scale_dt == other.scale_dt && zp_shape == other.zp_shape && zp_dt == other.zp_dt && selection_n == other.selection_n;
         }
     };
 
@@ -117,6 +118,7 @@ public:
             hash_combine(h, std::hash<std::string>()(k.weight_dt.to_string()));
             hash_combine(h, std::hash<std::string>()(k.scale_dt.to_string()));
             hash_combine(h, std::hash<std::string>()(k.zp_dt.to_string()));
+            hash_combine(h, std::hash<size_t>()(k.selection_n));
             return h;
         }
     };

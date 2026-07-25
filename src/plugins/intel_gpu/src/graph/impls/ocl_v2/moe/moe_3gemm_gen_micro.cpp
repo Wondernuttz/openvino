@@ -13,6 +13,8 @@
 #include "ocl_v2/utils/jitter.hpp"
 #include "../utils/kernel_generator.hpp"
 
+#include <cstdlib>
+
 // clang-format on
 namespace ov::intel_gpu::ocl {
 
@@ -219,6 +221,15 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
     const auto& zp_layout = params.get_input_layout(zp_idx);
     // Symmetric quantization: ZP placeholder has count()==0 (element::dynamic, Shape{0})
     const bool is_weight_symmetric_quantized = (zp_layout.count() == 0);
+    const auto& weight_shape = weight_layout.get_shape();
+    const bool is_prefill = true;
+    size_t n = is_prefill ? 256 : 8;
+    if (const char* n_hint = std::getenv("MOE_MICRO_GEMM_N_HINT")) {
+        const int parsed_hint = std::atoi(n_hint);
+        if (parsed_hint >= 8 && parsed_hint <= 1024 && (parsed_hint & (parsed_hint - 1)) == 0) {
+            n = static_cast<size_t>(parsed_hint);
+        }
+    }
 
     MoE3GemmMicroGenerator::GemmCacheKey key;
     key.type = type;
@@ -228,6 +239,7 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
     key.scale_dt = scale_layout.data_type;
     key.zp_shape = zp_layout.get_shape();
     key.zp_dt = zp_layout.data_type;
+    key.selection_n = n;
 
     auto it = s_gemm_cache.find(key);
     if (it != s_gemm_cache.end()) {
@@ -242,10 +254,7 @@ void MoE3GemmMicroGenerator::init_microkernels(const kernel_impl_params& params,
     hw_info.systolicAvailable = device_info.supports_immad;
 
     // weight layout example: u4:bfyx:4x3072x8x128:nopad
-    const auto& weight_shape = params.get_input_layout(wei_idx).get_shape();
-    const bool is_prefill = true;
     size_t m = weight_shape[1];
-    size_t n = is_prefill ? 32 : 8;
     size_t k = weight_shape.size() == 4 ? weight_shape[2] * weight_shape[3] : weight_shape[2];
 
     GPU_DEBUG_TRACE_DETAIL << "MoE3GemmMicroGenerator::init_microkernels: " << std::endl;
