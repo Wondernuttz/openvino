@@ -97,6 +97,9 @@ struct custom_gpu_primitive_impl : typed_primitive_impl<custom_gpu_primitive> {
         for (size_t i = 0; i < instance.outputs_memory_count(); i++) {
             args.outputs.push_back(instance.output_memory_ptr(i));
         }
+        for (const auto& memory : instance.get_intermediates_memories()) {
+            args.intermediates.push_back(memory);
+        }
 
         OPENVINO_ASSERT(_kernels.size() == cl_kernels.size(), "Custom GPU pipeline kernel count mismatch");
         for (size_t i = 0; i < _kernels.size(); ++i) {
@@ -115,6 +118,9 @@ struct custom_gpu_primitive_impl : typed_primitive_impl<custom_gpu_primitive> {
         for (size_t i = 0; i < instance.outputs_memory_count(); i++) {
             args.outputs.push_back(instance.output_memory_ptr(i));
         }
+        for (const auto& memory : instance.get_intermediates_memories()) {
+            args.intermediates.push_back(memory);
+        }
 
         OPENVINO_ASSERT(_kernels.size() == cl_kernels.size(), "Custom GPU pipeline kernel count mismatch");
         std::vector<event::ptr> stage_events(events);
@@ -131,6 +137,26 @@ struct custom_gpu_primitive_impl : typed_primitive_impl<custom_gpu_primitive> {
 
     std::vector<kernel::ptr> get_kernels() const override {
         return _kernels;
+    }
+
+    std::vector<BufferDescriptor> get_internal_buffer_descs(const kernel_impl_params& params) const override {
+        if (cl_kernels.size() != 3 ||
+            cl_kernels.front()->code.kernelString->entry_point != "quant_pack_a4_grouped_g64_v1") {
+            return {};
+        }
+        const auto input_shape = params.get_input_layout(0).get_partial_shape();
+        OPENVINO_ASSERT(input_shape.rank().is_static() && input_shape.size() == 3 &&
+                        input_shape[0].is_static() && input_shape[1].is_static() && input_shape[2].is_static(),
+                        "Gemma MoE A4W4 internal buffers require a concrete runtime shape");
+        const size_t experts = input_shape[0].get_length();
+        const size_t rows = input_shape[1].get_length();
+        const size_t kdim = input_shape[2].get_length();
+        const size_t groups = kdim / 64;
+        return {
+            BufferDescriptor(experts * rows * kdim / 2, ov::element::u8),
+            BufferDescriptor(experts * groups * rows, ov::element::f16),
+            BufferDescriptor(experts * groups * rows, ov::element::i16),
+        };
     }
 
     void save(BinaryOutputBuffer& ob) const override {
@@ -171,6 +197,13 @@ static kernel_selector::kernel_argument_element get_arg(custom_gpu_primitive::ar
 
     ret.index = arg.index;
 
+    return ret;
+}
+
+static kernel_selector::kernel_argument_element get_internal_arg(size_t index) {
+    kernel_selector::kernel_argument_element ret;
+    ret.t = kernel_selector::kernel_argument_types::INTERNAL_BUFFER;
+    ret.index = index;
     return ret;
 }
 
@@ -398,6 +431,100 @@ static std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> create_low_
     return kernels;
 }
 
+static std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> create_gemma_moe_a4w4_pipeline(
+    const custom_gpu_primitive_node& arg,
+    const kernel_impl_params& impl_param,
+    const custom_gpu_primitive& primitive) {
+    const auto input_shape = impl_param.get_input_layout(0).get_partial_shape();
+    OPENVINO_ASSERT(input_shape.rank().is_static() && input_shape.size() == 3,
+                    "Gemma MoE A4W4 input must have rank 3");
+    OPENVINO_ASSERT(input_shape[0].is_static() && input_shape[1].is_static() && input_shape[2].is_static(),
+                    "Gemma MoE A4W4 requires a concrete runtime shape");
+
+    const size_t experts = input_shape[0].get_length();
+    const size_t rows = input_shape[1].get_length();
+    const size_t kdim = input_shape[2].get_length();
+    const auto input_type = impl_param.get_input_layout(0).data_type;
+    const auto output_type = impl_param.get_output_layout(0).data_type;
+    OPENVINO_ASSERT(experts == 128, "Gemma MoE A4W4 expects 128 experts, got ", experts);
+    OPENVINO_ASSERT(kdim % 128 == 0, "Gemma MoE A4W4 K must be divisible by 128, got ", kdim);
+    OPENVINO_ASSERT(input_type == data_types::f16 || input_type == data_types::f32,
+                    "Gemma MoE A4W4 activation must use f16 or f32 storage");
+    OPENVINO_ASSERT(output_type == data_types::f16 || output_type == data_types::f32,
+                    "Gemma MoE A4W4 output must use f16 or f32 storage");
+    OPENVINO_ASSERT(impl_param.input_layouts.size() == 7,
+                    "Gemma MoE A4W4 expects activation plus two weight/scale/offset triples");
+    OPENVINO_ASSERT(impl_param.output_layouts.size() == 2,
+                    "Gemma MoE A4W4 expects two projection outputs");
+
+    const size_t ng64 = kdim / 64;
+    const std::string common_options = primitive.build_options +
+        " -cl-mad-enable -DKDIM=" + std::to_string(kdim) +
+        " -DMROWS=" + std::to_string(rows) +
+        " -DGEMMA_X_TYPE=" + (input_type == data_types::f16 ? "half" : "float") +
+        " -DGEMMA_Y_TYPE=" + (output_type == data_types::f16 ? "half" : "float") +
+        (output_type == data_types::f16 ? " -DGEMMA_OUTPUT_HALF" : "");
+    std::vector<std::shared_ptr<kernel_selector::cl_kernel_data>> kernels;
+    kernels.reserve(3);
+    kernels.push_back(make_custom_kernel(
+        arg,
+        impl_param,
+        primitive,
+        "quant_pack_a4_grouped_g64_v1",
+        common_options + " -DGEMMA_DISABLE_GEMM",
+        {16, experts * rows, 1},
+        {16, 1, 1},
+        {},
+        false));
+    kernels.back()->params.arguments = {
+        get_arg({custom_gpu_primitive::arg_input, 0}),
+        get_internal_arg(0),
+        get_internal_arg(1),
+        get_internal_arg(2),
+    };
+
+    for (size_t projection = 0; projection < 2; ++projection) {
+        const auto output_shape = impl_param.get_output_layout(projection).get_partial_shape();
+        OPENVINO_ASSERT(output_shape.rank().is_static() && output_shape.size() == 3 &&
+                        output_shape[2].is_static(),
+                        "Gemma MoE A4W4 projection output must have rank 3 and static N");
+        const size_t ndim = output_shape[2].get_length();
+        OPENVINO_ASSERT(ndim % 32 == 0, "Gemma MoE A4W4 N must be divisible by 32, got ", ndim);
+        const auto weight_input = static_cast<custom_gpu_primitive::arg_index>(1 + projection * 3);
+        const auto scale_input = static_cast<custom_gpu_primitive::arg_index>(2 + projection * 3);
+        const auto offset_input = static_cast<custom_gpu_primitive::arg_index>(3 + projection * 3);
+        const auto projection_output = static_cast<custom_gpu_primitive::arg_index>(projection);
+        const std::string gemm_entry_point =
+            "gemm_asym_s4s4_grouped_m32n2_p" + std::to_string(projection);
+        const std::string gemm_options = common_options +
+            " -cl-intel-256-GRF-per-thread -DNDIM=" + std::to_string(ndim) +
+            " -DNG64=" + std::to_string(ng64) +
+            " -DPROJECTION_INDEX=" + std::to_string(projection) +
+            " -DGEMMA_DISABLE_QUANT" +
+            " -Dgemm_asym_s4s4_grouped_m32n2=" + gemm_entry_point;
+        kernels.push_back(make_custom_kernel(
+            arg,
+            impl_param,
+            primitive,
+            gemm_entry_point,
+            gemm_options,
+            {ndim / 2, (rows + 31) / 32, experts},
+            {16, 1, 1},
+            {},
+            false));
+        kernels.back()->params.arguments = {
+            get_internal_arg(0),
+            get_arg({custom_gpu_primitive::arg_input, weight_input}),
+            get_arg({custom_gpu_primitive::arg_input, scale_input}),
+            get_arg({custom_gpu_primitive::arg_input, offset_input}),
+            get_internal_arg(1),
+            get_internal_arg(2),
+            get_arg({custom_gpu_primitive::arg_output, projection_output}),
+        };
+    }
+    return kernels;
+}
+
 static std::unique_ptr<primitive_impl> create(const custom_gpu_primitive_node& arg, const kernel_impl_params& impl_param) {
     const auto primitive = arg.get_primitive().get();
 
@@ -427,6 +554,8 @@ static std::unique_ptr<primitive_impl> create(const custom_gpu_primitive_node& a
     } else if (primitive->kernel_entry_point == "internary_projection_group_v1") {
         cl_kernels = create_low_bit_projection_pipeline(
             arg, impl_param, *primitive, "INTERNARY", "ternary_gemv_native_s2_v1");
+    } else if (primitive->kernel_entry_point == "gemma_moe_a4w4_group_v1") {
+        cl_kernels = create_gemma_moe_a4w4_pipeline(arg, impl_param, *primitive);
     } else {
         cl_kernels.push_back(make_custom_kernel(arg,
                                                 impl_param,
