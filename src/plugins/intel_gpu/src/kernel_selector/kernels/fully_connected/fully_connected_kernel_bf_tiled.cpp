@@ -6,6 +6,8 @@
 #include "fully_connected_kernel_bf_tiled_dyn_b.h"
 #include "kernel_selector_utils.h"
 #include "swiglu/swiglu_kernel_base.h"
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <functional>
 #include "common_types.h"
@@ -476,6 +478,68 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
     if (idx >= 0 && idx < static_cast<int>(auto_tune_params.size())
         && TuneParamsSelector::VerifyTuneParams(params, auto_tune_params[idx]))
         return auto_tune_params[idx];
+
+    // Experimental B70 tuning hook. Format:
+    // IFM,OFM,tile_b,tile_ofm,tile_ifm,tile_k,outer_ofm,dispatch_bsv,dispatch_fsv
+    // IFM or OFM may be zero to match every size. Invalid hints are ignored.
+    if (preferred_kernel_type != KernelType::SLM && params.compressed &&
+        (params.weights.GetDType() == WeightsType::INT4 || params.weights.GetDType() == WeightsType::UINT4)) {
+        if (const char* raw_hint = std::getenv("FC_BF_TILED_TUNE_HINT")) {
+            size_t hint_ifm = 0;
+            size_t hint_ofm = 0;
+            unsigned tile_b = 0;
+            unsigned tile_ofm = 0;
+            unsigned tile_ifm = 0;
+            unsigned tile_k = 0;
+            unsigned outer_ofm = 0;
+            unsigned dispatch_bsv = 0;
+            unsigned dispatch_fsv = 0;
+            const int fields = std::sscanf(raw_hint,
+                                           "%zu,%zu,%u,%u,%u,%u,%u,%u,%u",
+                                           &hint_ifm,
+                                           &hint_ofm,
+                                           &tile_b,
+                                           &tile_ofm,
+                                           &tile_ifm,
+                                           &tile_k,
+                                           &outer_ofm,
+                                           &dispatch_bsv,
+                                           &dispatch_fsv);
+            const auto input_f = get_input_bf_size(params).second;
+            const auto output_f = get_output_aligned_bf_size(params, false).second;
+            const auto weights_layout = params.weights.GetLayout();
+            const bool valid_layout =
+                weights_layout == WeightsLayout::oiyx ||
+                (weights_layout == WeightsLayout::os_iyx_osv16 && tile_ofm == 1) ||
+                (weights_layout == WeightsLayout::os_is_yx_osv32_isv2 &&
+                 (tile_ofm == 1 || tile_ofm == 2)) ||
+                (weights_layout == WeightsLayout::os_is_yx_osv64_isv2 &&
+                 (tile_ofm == 2 || tile_ofm == 4));
+            const bool valid_domain = tile_b >= 1 && tile_b <= 32 &&
+                                      (tile_ofm == 1 || tile_ofm == 2 || tile_ofm == 4) &&
+                                      (tile_ifm == 1 || tile_ifm == 2) &&
+                                      (tile_k == 1 || tile_k == 2 || tile_k == 4 || tile_k == 8) &&
+                                      tile_k * tile_ofm <= 8 &&
+                                      outer_ofm >= 1 && outer_ofm <= 2 &&
+                                      dispatch_bsv >= 1 && dispatch_bsv <= 16 &&
+                                      dispatch_fsv >= 1 && dispatch_fsv <= 16 &&
+                                      valid_layout;
+            const bool shape_match = (hint_ifm == 0 || hint_ifm == input_f) &&
+                                     (hint_ofm == 0 || hint_ofm == output_f);
+            if (fields == 9 && valid_domain && shape_match) {
+                tune_params hinted(tile_b,
+                                   tile_ofm,
+                                   tile_ifm,
+                                   tile_k,
+                                   outer_ofm,
+                                   dispatch_bsv,
+                                   dispatch_fsv,
+                                   EXE_MODE_DEFAULT);
+                if (TuneParamsSelector::VerifyTuneParams(params, hinted))
+                    return hinted;
+            }
+        }
+    }
 
     auto bf_size = get_output_aligned_bf_size(params, false);
     size_t batch = bf_size.first;
