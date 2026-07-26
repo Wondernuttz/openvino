@@ -20,6 +20,7 @@ using ov::intel_gpu::ocl::moe::ResidentExpertWeightProvider;
 #ifdef ENABLE_ONEDNN_FOR_GPU
 #    include <algorithm>
 #    include <chrono>
+#    include <cstdlib>
 #    include <cstdint>
 #    include <fstream>
 #    include <initializer_list>
@@ -979,9 +980,15 @@ public:
             use_micro_gemm_prefill = false;
         }
 
-        // grouped_gemm path: single OneDNN grouped matmul per GEMM layer (all experts at once).
-        // micro_gemm takes priority; grouped_gemm falls back to onednn loop by default.
+        // Grouped GEMM path: oneDNN grouped matmul across all experts.
         use_grouped_gemm_prefill = config.get_moe_use_grouped_gemm_prefill();
+        if (const char* grouped_hint = std::getenv("MOE_USE_GROUPED_GEMM_PREFILL")) {
+            if (grouped_hint[0] == '0' && grouped_hint[1] == '\0') {
+                use_grouped_gemm_prefill = false;
+            } else if (grouped_hint[0] == '1' && grouped_hint[1] == '\0') {
+                use_grouped_gemm_prefill = true;
+            }
+        }
         // grouped_gemm supersedes micro_gemm
         if (use_grouped_gemm_prefill) {
             use_micro_gemm_prefill = false;
