@@ -1425,7 +1425,7 @@ public:
             return false;
         }
 
-        if (desc->k_head_size > 256 || desc->v_head_size > 256) {
+        if (desc->k_head_size > 512 || desc->v_head_size > 512) {
             return false;
         }
 
