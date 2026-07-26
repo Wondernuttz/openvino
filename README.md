@@ -25,6 +25,17 @@ Open-source software toolkit for optimizing and deploying deep learning models.
 - **Broad Platform Compatibility**: Reduce resource demands and efficiently deploy on a range of platforms from edge to cloud. OpenVINO™ supports inference on CPU (x86, ARM), GPU (Intel integrated & discrete GPU) and AI accelerators (Intel NPU).
 - **Community and Ecosystem**: Join an active community contributing to the enhancement of deep learning performance across various domains.
 
+## Wondernuttz Arc Xe2 branch
+
+Branch `arc-xe2-gemma4-pa-2026.4` carries the Intel Arc GPU work used for the
+Gemma-4 26B-A4B OpenVINO INT4 release. The current patch enables the existing
+512-head Xe2 micro-SDPA/XMX route for paged prefill. On one Arc Pro B70, the
+validated result is 5,827 prompt tok/s at 6,622 tokens and 112 tok/s
+short-context decode, with the long-prompt coherence gate passing 4/4.
+
+See [WONDERNUTTZ_GEMMA4_ARC.md](WONDERNUTTZ_GEMMA4_ARC.md) for the measured
+history, exact settings, build instructions and limits.
+
 Check out the [OpenVINO Cheat Sheet](https://docs.openvino.ai/2026/_static/download/OpenVINO_Quick_Start_Guide.pdf) and [Key Features](https://docs.openvino.ai/2026/about-openvino/key-features.html) for a quick reference.
 
 
