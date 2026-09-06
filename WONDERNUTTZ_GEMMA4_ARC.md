@@ -1,13 +1,15 @@
 # Gemma-4 26B-A4B INT4 on one Arc Pro B70
 
-Last updated: 2026-07-26
+Historical results: 2026-07-26. Index updated: 2026-09-06.
+
+**New results:** [September 6 grouped-MoE lookup optimization and 24K validation](WONDERNUTTZ_GEMMA4_PREFILL_20260906.md): matched +135% PP at 15,872 tokens and +74% at 24,576 tokens, with quality gates and limitations. The sections below preserve the July stack and its historical faults; they are not current limits of the new candidate. Earlier attribution to `MOE_MICRO_GEMM_N_HINT=128` as a grouped tile change is corrected: that hint is bypassed by the grouped path.
 
 This is the benchmark and fix history for the Wondernuttz OpenVINO INT4 build of
 Gemma-4 26B-A4B. Every accepted number below came from one Intel Arc Pro B70
 with 32 GB VRAM. Prompt-processing tests used one request at a time and unique
 prompt contents so prefix-cache hits could not inflate the result.
 
-## Current result
+## July 26 result
 
 Tested stack:
 

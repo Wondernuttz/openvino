@@ -337,6 +337,15 @@ protected:
         jit.make("OUTPUT_TYPE", "half");  // output
         if (m_use_grouped_gemm)
             jit.make("ONEDNN_GROUPED_GEMM_USED", 1);
+        // Non-offloaded grouped masks are built in ascending token order by
+        // get_expert_mask_from_gpu(). Only replace address lookup; retain the
+        // existing expert accumulation order and all floating-point operations.
+        if (m_use_grouped_gemm && desc->_otd.lru_expert_num == 0) {
+            if (const char* hint = std::getenv("MOE_GROUPED_BINARY_LOOKUP")) {
+                if (hint[0] == '1' && hint[1] == '\0')
+                    jit.make("MOE_GROUPED_BINARY_LOOKUP", 1);
+            }
+        }
 
         return jit;
     }

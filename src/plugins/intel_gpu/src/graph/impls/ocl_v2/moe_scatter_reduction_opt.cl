@@ -57,6 +57,30 @@ KERNEL(moe_scatter_reduction_ref)(
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    // Non-offloaded grouped prefill builds each expert list in ascending token
+    // order. One lane per selected expert can locate its row in O(log n),
+    // instead of having the workgroup repeatedly scan the entire list.
+#if MOE_GROUPED_BINARY_LOOKUP
+    if (threads_index < ACTIVE_EXPERTS) {
+        const uint i = threads_index;
+        if (start_offset_index[i] != (uint)UINT_MAX) {
+            const uint token_len = tokens_len_per_expert[start_offset_index[i]];
+            const INPUT6_TYPE expert_id = experts_ids[start_offset_index[i]];
+            const INPUT4_TYPE expert_offset = expert_id == 0 ? 0 : experts_start_offset[expert_id - 1];
+            uint lo = 0;
+            uint hi = token_len;
+            while (lo < hi) {
+                const uint mid = lo + ((hi - lo) >> 1);
+                if ((uint)tokens_per_expert[expert_offset + mid] < token_group_id)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            if (lo < token_len && (uint)tokens_per_expert[expert_offset + lo] == token_group_id)
+                expert_input_offsets[i] = expert_offset + lo;
+        }
+    }
+#else
     // Search for input offsets
     for (uint i = 0; i < ACTIVE_EXPERTS; i++) {
         if (start_offset_index[i] == (uint)UINT_MAX)
@@ -90,6 +114,7 @@ KERNEL(moe_scatter_reduction_ref)(
         }
     }
 
+#endif
     barrier(CLK_LOCAL_MEM_FENCE);
 
     uint dest_index = token_group_id * HIDDEN_SIZE;
