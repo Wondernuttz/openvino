@@ -36,6 +36,8 @@ All eight installed Gemma 26B A4B variants completed 11 automated factual/simple
 
 These are per-checkpoint measurements, **not per-checkpoint matched speedup ratios**. Exact-repeat TTFT is a cache hit, not raw prefill throughput. VRAM samples are five seconds apart, not true high-water marks. No memory guard tripped in these eight runs. The separate normal-server Chimera canary returned the correct location and corrected password without raw reasoning delimiters.
 
+The final kernel-journal audit found GPU.2 CCS/BCS engine resets at 04:17:17, matching termination of the temporary canary server immediately after its successful requests. The canary's response checks and process-exit summary alone did not capture that device-level fault. Later old/new StyleTune tests and production startup succeeded without a host reboot; no further GPU faults appeared between deployment at 04:22:30 and the subsequent journal check. This is an unresolved shutdown/teardown issue, not a claim of fault-free operation or a proven lookup-kernel root cause. Retain the old runtime and qualify repeated model switches separately.
+
 ## Manual RP review is a separate gate
 
 Automated recall success does not imply perfect prose or instruction following. The manually reviewed examples included a paragraph-count/output-cap miss in Dark Soul, Tomas/Thomas spelling drift in Midnight Macaw, and a small invented visitor action in Shadow Siren. These outputs remained grammatical and broadly coherent, but are not perfect agency/format adherence passes.
