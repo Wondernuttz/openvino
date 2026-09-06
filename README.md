@@ -28,13 +28,18 @@ Open-source software toolkit for optimizing and deploying deep learning models.
 ## Wondernuttz Arc Xe2 branch
 
 Branch `arc-xe2-gemma4-pa-2026.4` carries the Intel Arc GPU work used for the
-Gemma-4 26B-A4B OpenVINO INT4 release. The current patch enables the existing
-512-head Xe2 micro-SDPA/XMX route for paged prefill. On one Arc Pro B70, the
-validated result is 5,827 prompt tok/s at 6,622 tokens and 112 tok/s
-short-context decode, with the long-prompt coherence gate passing 4/4.
+Gemma-4 26B-A4B OpenVINO INT4 release. The September 6 opt-in grouped-MoE
+binary lookup reaches **6,866 PP tok/sec at 15,872 tokens (+135%)** and
+**4,767 PP tok/sec at 24,576 tokens (+74%)** in matched Heretic-model tests on
+one Arc Pro B70. Long-context decode remains approximately 93–99 tok/sec;
+short decode is approximately 111 tok/sec. No weights or precision were changed.
 
-See [WONDERNUTTZ_GEMMA4_ARC.md](WONDERNUTTZ_GEMMA4_ARC.md) for the measured
-history, exact settings, build instructions and limits.
+Read the [new measurements, opt-in configuration, and quality/fault caveats](WONDERNUTTZ_GEMMA4_PREFILL_20260906.md).
+These are bounded reference-model tests, not universal per-tune or dense-31B
+claims. The measured binary has profiling capability compiled in with counters
+disabled; clean-release deployment acceptance is separate. Earlier 512-head
+micro-SDPA results and build instructions remain in the
+[July benchmark history](WONDERNUTTZ_GEMMA4_ARC.md).
 
 Check out the [OpenVINO Cheat Sheet](https://docs.openvino.ai/2026/_static/download/OpenVINO_Quick_Start_Guide.pdf) and [Key Features](https://docs.openvino.ai/2026/about-openvino/key-features.html) for a quick reference.
 
