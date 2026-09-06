@@ -36,8 +36,9 @@ short decode is approximately 111 tok/sec. No weights or precision were changed.
 
 Read the [new measurements, opt-in configuration, and quality/fault caveats](WONDERNUTTZ_GEMMA4_PREFILL_20260906.md).
 These are bounded reference-model tests, not universal per-tune or dense-31B
-claims. The measured binary has profiling capability compiled in with counters
-disabled; clean-release deployment acceptance is separate. Earlier 512-head
+claims. [Clean Release follow-up](WONDERNUTTZ_GEMMA4_RELEASE_GATE_20260906.md)
+retained a 76% matched 24K gain and records per-checkpoint cache/quality gates,
+including the StyleTune rollout hold. Earlier 512-head
 micro-SDPA results and build instructions remain in the
 [July benchmark history](WONDERNUTTZ_GEMMA4_ARC.md).
 

@@ -2,6 +2,8 @@
 
 September 6, 2026 — Wondernuttz OpenVINO fork, branch `arc-xe2-gemma4-pa-2026.4`.
 
+Follow-up: [clean Release acceptance and per-checkpoint 24K/cache results](WONDERNUTTZ_GEMMA4_RELEASE_GATE_20260906.md), including the unresolved StyleTune RP difference and rollout hold. The measurements below retain their original binary and methodology.
+
 An opt-in grouped-MoE token-row lookup optimization improves measured long-prompt processing without changing model weights, expert routing, KV precision, or floating-point accumulation order. **These measurements are for Gemma 4 26B A4B Heretic, not automatically for every fine-tune, dense 31B, or every Intel GPU.** Runtime changes do not require re-exporting the model.
 
 ## Matched results: one B70, 32 GB VRAM
