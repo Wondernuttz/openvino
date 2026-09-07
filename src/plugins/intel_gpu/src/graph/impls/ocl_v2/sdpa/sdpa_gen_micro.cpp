@@ -18,6 +18,8 @@
 #include "paged_attention_opt.hpp"
 #include "sdpa_base.hpp"
 #include "../utils/kernel_generator.hpp"
+#include <cstdlib>
+#include <cstring>
 // clang-format on
 namespace ov::intel_gpu::ocl {
 namespace {
@@ -377,6 +379,9 @@ sdpa_config_t xehpc_h256_s64 = {16, 32, 32, 32, 8, 1, 8, 1};
 sdpa_config_t xehpc_h256_2nd = {16, 16, 16, 16, 16, 1, 16, 1};
 
 sdpa_config_t xehpc_h512_pa = {16, 16, 32, 16, 16, 2, 16, 2};
+// Cached K addressing selects one physical 16-row page per subgroup.
+// Keep KQ M=16 while widening Q; the generic h512 M=32 tile is not PA-safe.
+sdpa_config_t xehpc_h512_pa_wideq = {16, 32, 32, 32, 16, 2, 16, 2};
 sdpa_config_t xehpc_h512 = {32, 16, 64, 16, 8, 4, 8, 4};
 sdpa_config_t xehpc_h512_s64 = {16, 16, 64, 16, 8, 2, 8, 2};
 sdpa_config_t xehpc_h512_s128_2nd = {16, 16, 64, 16, 8, 1, 8, 1};
@@ -712,6 +717,13 @@ sdpa_config_t* choose_config_xehpc(int head_size, int seq, bool thin_q, bool qua
 }
 
 sdpa_config_t* choose_config_xe2(int head_size, int seq, bool thin_q, bool quantized, bool is_integrated, bool is_pa, bool is_prefill) {
+    // Opt-in: tested on Gemma-4 26B/B70 cached prefill. Leave other profiles
+    // and single-token decode unchanged. Unknown values select the baseline.
+    const char* mixed_tile = std::getenv("GEMMA_MIXED_512_TILE");
+    if (mixed_tile && std::strcmp(mixed_tile, "wideq") == 0 && head_size == 512
+        && seq <= 0 && is_pa && !is_prefill && !thin_q && !is_integrated) {
+        return &xehpc_h512_pa_wideq;
+    }
     if (seq <= 0 && is_pa) {
         return choose_config_xehpc(head_size, seq, thin_q, quantized, is_integrated, is_pa, is_prefill);
     }

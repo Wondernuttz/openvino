@@ -27,6 +27,13 @@ Open-source software toolkit for optimizing and deploying deep learning models.
 
 ## Wondernuttz Arc Xe2 branch
 
+**September 6 update — corrected wide-query cached prefill:** the 26B Heretic
+reference improved from **4,841 to 5,653 uncached PP tok/s at 24,576 tokens (+16.8%)**;
+the cleaned deployment build confirmed 5,667 tok/s. Short decode stayed about112 tok/s.
+The live 26B bots now use this opt-in kernel, retaining their16K context and precision.
+See [configuration, quality gates and the open baseline U4 caveat](WIDEQ_24K_20260906.md).
+This is an additional gain on top of the earlier binary-lookup results below.
+
 Branch `arc-xe2-gemma4-pa-2026.4` carries the Intel Arc GPU work used for the
 Gemma-4 26B-A4B OpenVINO INT4 release. The September 6 opt-in grouped-MoE
 binary lookup reaches **6,866 PP tok/sec at 15,872 tokens (+135%)** and
